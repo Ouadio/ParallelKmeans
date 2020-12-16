@@ -13,7 +13,10 @@ Given that the input is generally an image with a resolution higher than 100x100
 
 Moreover, shared variables that need to be updated separately on different threads *(new centroid sums and cluster sizes)* but still require the overall result are being reduced as arrays *(Made possible starting openMP v4.0)*.
 
-### II. TBB Implementation  *(In progress)*
+### II. TBB Implementation  
+Same as OpenMP, the tbb parallelization was made on rows only for both centroid computation and image
+segmentation for the same reasons mentioned in the previous paragraph. Besides, to reduce code complexity, the main loops in update centroid can be seen from a **Map-Reduce** perspective given that data is spread on the spawned threads which write results on a shared set of variables *(mapping, new centroid sums etc..)*. Thus, a tbb parallel_reduce was used to capture both loop parallelization (map) and shared variables reduction (reduce).
+
 ### III. MPI Implementation   *(In progress)*
 
 
