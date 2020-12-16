@@ -23,9 +23,11 @@
 #include <boost/filesystem.hpp>
 #include <boost/algorithm/string.hpp>
 #include <fstream>
+#include "tbb/tbb.h"
 
 namespace KM
 {
+	using namespace tbb;
 
 	//Constructor
 	KMeans::KMeans(uint16_t nb_channels, uint16_t nb_centroids)
@@ -55,7 +57,7 @@ namespace KM
 	}
 
 	//Getters for centroids
-	std::vector<uchar> KMeans::getCentroids()
+	std::vector<uchar> KMeans::getCentroids() const
 	{
 		return (m_centroids);
 	}
@@ -134,8 +136,10 @@ namespace KM
 												std::string mode)
 	{
 		using namespace cv;
+		using namespace tbb;
 
 		bool omp = (mode == "omp");
+		bool tbb = (mode == "tbb");
 
 		int length = m_nb_channels * m_nb_centroid;
 		double distance = 0;
@@ -150,61 +154,169 @@ namespace KM
 		std::vector<double> displacement(m_nb_centroid, 0.0);
 
 		//OPEN MP OR SEQ MODES
-		//Grayscale
-		if (m_nb_channels == 1)
+		if (!tbb)
 		{
+			//Grayscale
+			if (m_nb_channels == 1)
+			{
 #pragma omp parallel for schedule(static, 8) reduction(+                                                \
 													   : m_cluster_sizes [0:m_nb_centroid]) reduction(+ \
 																									  : m_new_centroids [0:length]) firstprivate(distance, c) shared(image, m_mapping) if (omp)
-			for (auto row = 0; row < image.rows; row++)
+				for (auto row = 0; row < image.rows; row++)
 
-			{
-				const uchar *pixelsRow = image.ptr<uchar>(row); //Faster access through rows pointer
-
-				for (auto col = 0; col < image.cols; col++)
 				{
-					distance = std::numeric_limits<double>::max();
+					const uchar *pixelsRow = image.ptr<uchar>(row); //Faster access through rows pointer
 
-					c = argClosest(distance, row, col, image);
+					for (auto col = 0; col < image.cols; col++)
+					{
+						distance = std::numeric_limits<double>::max();
 
-					m_mapping[row * image.cols + col] = c;
+						c = argClosest(distance, row, col, image);
 
-					//One more pixel belonging to cluster c : increment by 1
-					m_cluster_sizes[c] += 1; //Reduction
+						m_mapping[row * image.cols + col] = c;
 
-					//Accumulating pixels value in the c position (helps computing barycentre later)
-					m_new_centroids[c] += (double)(pixelsRow[col]);
+						//One more pixel belonging to cluster c : increment by 1
+						m_cluster_sizes[c] += 1; //Reduction
+
+						//Accumulating pixels value in the c position (helps computing barycentre later)
+						m_new_centroids[c] += (double)(pixelsRow[col]);
+					}
+				}
+			}
+			//RGB
+			else
+			{
+#pragma omp parallel for schedule(static, 8) reduction(+                                                \
+													   : m_cluster_sizes [0:m_nb_centroid]) reduction(+ \
+																									  : m_new_centroids [0:length]) firstprivate(distance, c) shared(image, m_mapping) if (omp)
+				for (auto row = 0; row < image.rows; row++)
+
+				{
+					const Vec3b *pixelsRow = image.ptr<Vec3b>(row); //Faster access through rows pointer
+
+					for (auto col = 0; col < image.cols; col++)
+					{
+						distance = std::numeric_limits<double>::max();
+
+						c = argClosest(distance, row, col, image);
+
+						m_mapping[row * image.cols + col] = c;
+
+						//One more pixel belonging to cluster c : increment by 1
+						m_cluster_sizes[c] += 1; //Reduction
+
+						//Accumulating pixels value in the c position (helps computing barycentre later)
+						for (uint16_t channel = 0; channel < m_nb_channels; channel++)
+						{
+							m_new_centroids[c * m_nb_channels + channel] += (double)(pixelsRow[col][channel]);
+						}
+					}
 				}
 			}
 		}
-		//RGB
+		//TBB
 		else
 		{
-#pragma omp parallel for schedule(static, 8) reduction(+                                                \
-													   : m_cluster_sizes [0:m_nb_centroid]) reduction(+ \
-																									  : m_new_centroids [0:length]) firstprivate(distance, c) shared(image, m_mapping) if (omp)
-			for (auto row = 0; row < image.rows; row++)
-
-			{
-				const Vec3b *pixelsRow = image.ptr<Vec3b>(row); //Faster access through rows pointer
-
-				for (auto col = 0; col < image.cols; col++)
-				{
-					distance = std::numeric_limits<double>::max();
-
-					c = argClosest(distance, row, col, image);
-
-					m_mapping[row * image.cols + col] = c;
-
-					//One more pixel belonging to cluster c : increment by 1
-					m_cluster_sizes[c] += 1; //Reduction
-
-					//Accumulating pixels value in the c position (helps computing barycentre later)
-					for (uint16_t channel = 0; channel < m_nb_channels; channel++)
+			std::vector<double> new_centroids(m_nb_channels * m_nb_centroid, 0.0);
+			new_centroids = tbb::parallel_reduce(
+				//Range (along rows)
+				tbb::blocked_range<size_t>(0, image.rows),
+				//Id value
+				std::vector<double>(m_nb_channels * m_nb_centroid, 0),
+				//Kernel
+				[&](tbb::blocked_range<size_t> localRows, std::vector<double> temp_new_centroids) -> std::vector<double> {
+					for (auto row = localRows.begin(); row < localRows.end(); row++)
 					{
-						m_new_centroids[c * m_nb_channels + channel] += (double)(pixelsRow[col][channel]);
+						//Gray Scale
+						if (m_nb_channels == 1)
+						{
+
+							const uchar *pixelsRow = image.ptr<uchar>(row);
+							uint32_t c = 0;
+
+							for (auto col = 0; col < image.cols; col++)
+							{
+								double distance = std::numeric_limits<double>::max();
+
+								c = argClosest(distance, row, col, image);
+
+								m_mapping[row * image.cols + col] = c;
+
+								//Accumulating pixels value in the c position (helps computing barycentre later)
+
+								temp_new_centroids[c] += (double)(pixelsRow[col]);
+							}
+						}
+						//RGB
+						else
+						{
+							const Vec3b *pixelsRow = image.ptr<Vec3b>(row); //Faster access through rows pointer
+							uint32_t c = 0;
+
+							for (auto col = 0; col < image.cols; col++)
+							{
+								double distance = std::numeric_limits<double>::max();
+
+								c = argClosest(distance, row, col, image);
+
+								m_mapping[row * image.cols + col] = c;
+
+								//Accumulating pixels value in the c position (helps computing barycentre later)
+
+								for (uint16_t channel = 0; channel < m_nb_channels; channel++)
+								{
+									temp_new_centroids[c * m_nb_channels + channel] += (double)(pixelsRow[col][channel]);
+								}
+							}
+						}
 					}
-				}
+
+					return (temp_new_centroids);
+				},
+				//Reduction function
+				[](std::vector<double> a, std::vector<double> b) -> std::vector<double> {
+					std::vector<double> c(a.size());
+					for (size_t i = 0; i < a.size(); i++)
+					{
+						c[i] = a.at(i) + b.at(i);
+					}
+					return (c);
+				});
+			for (size_t i = 0; i < m_nb_centroid * m_nb_channels; i++)
+			{
+				m_new_centroids[i] = new_centroids.at(i);
+			}
+
+			//Reducing on size of clusters
+			std::vector<double> cluster_sizes(m_nb_centroid, 0.0);
+
+			cluster_sizes = tbb::parallel_reduce(
+				//Range (along rows)
+				tbb::blocked_range<size_t>(0, image.rows),
+				//Id value
+				std::vector<double>(m_nb_centroid, 0),
+				//Kernel
+				[&](tbb::blocked_range<size_t> localRows, std::vector<double> temp_cluster_sizes) -> std::vector<double> {
+                    for (auto row = localRows.begin(); row < localRows.end(); row++)
+                    {
+                        for (int col = 0; col < image.cols; col++)
+                        {
+                            temp_cluster_sizes[m_mapping[row * image.cols + col]] += 1;
+                        }
+                    }
+                    return(temp_cluster_sizes); },
+				//Reduction
+				[](std::vector<double> a, std::vector<double> b) -> std::vector<double> {
+					std::vector<double> c(a.size());
+					for (size_t i = 0; i < a.size(); i++)
+					{
+						c[i] = a.at(i) + b.at(i);
+					}
+					return (c);
+				});
+			for (size_t i = 0; i < m_nb_centroid; i++)
+			{
+				m_cluster_sizes[i] = cluster_sizes.at(i);
 			}
 		}
 
@@ -225,6 +337,7 @@ namespace KM
 
 		return (displacement);
 	}
+
 	//Closest centroid
 	uint32_t KMeans::argClosest(double &distance,
 								int row,
@@ -262,49 +375,97 @@ namespace KM
 									  std::string mode)
 	{
 		using namespace cv;
+		using namespace tbb;
 
 		bool omp = (mode == "omp");
+		bool tbb = (mode == "tbb");
 
 		//OPEN MP OR SEQ MODES
-
-		uint32_t k = 0; //Selected cluster id (retrieved from m_mapping)
-
-		if (m_nb_channels == 1)
+		if (!tbb)
 		{
-			//Grayscale image segmentation
+			uint32_t k = 0; //Selected cluster id (retrieved from m_mapping)
+
+			if (m_nb_channels == 1)
+			{
+				//Grayscale image segmentation
 
 #pragma omp parallel for firstprivate(k) schedule(static, 8) if (omp)
-			for (int row = 0; row < image.rows; row++)
-			{
-				for (int col = 0; col < image.cols; col++)
+				for (int row = 0; row < image.rows; row++)
 				{
-					k = m_mapping[row * (image.cols) + col];
-					uchar &pixel = image.at<uchar>(row, col);
-					pixel = (uchar)m_centroids[k];
+					for (int col = 0; col < image.cols; col++)
+					{
+						k = m_mapping[row * (image.cols) + col];
+						uchar &pixel = image.at<uchar>(row, col);
+						pixel = (uchar)m_centroids[k];
+					}
 				}
 			}
-		}
 
-		//RGB image segmentation
-		else
-		{
-#pragma omp parallel for firstprivate(k) schedule(static, 8) if (omp)
-			for (int row = 0; row < image.rows; row++)
+			//RGB image segmentation
+			else
 			{
-				for (int col = 0; col < image.cols; col++)
+#pragma omp parallel for firstprivate(k) schedule(static, 8) if (omp)
+				for (int row = 0; row < image.rows; row++)
 				{
-					k = m_mapping[row * (image.cols) + col];
-
-					Vec3b &pixel = image.at<Vec3b>(row, col);
-
-					for (int c = 0; c < m_nb_channels; c++)
+					for (int col = 0; col < image.cols; col++)
 					{
-						pixel[c] = (uchar)m_centroids[k * m_nb_channels + c];
+						k = m_mapping[row * (image.cols) + col];
+
+						Vec3b &pixel = image.at<Vec3b>(row, col);
+
+						for (int c = 0; c < m_nb_channels; c++)
+						{
+							pixel[c] = (uchar)m_centroids[k * m_nb_channels + c];
+						}
 					}
 				}
 			}
 		}
+		//TBB MODE
+		else
+		{
+			//Grayscale image segmentation
+			if (m_nb_channels == 1)
+			{
+				parallel_for(blocked_range<int>(0, (int)image.rows), [=, &image](blocked_range<int> localRows) {
+					for (int row = localRows.begin(); row < localRows.end(); row++)
+					{
+						parallel_for(blocked_range<int>(0, (int)image.cols), [=, &image](blocked_range<int> localCols) {
+							for (int col = localCols.begin(); col < localCols.end(); col++)
+							{
+								int k = m_mapping[row * (image.cols) + col];
 
+								uchar &pixel = image.at<uchar>(row, col);
+
+								pixel = (uchar)m_centroids[k];
+							}
+						});
+					}
+				});
+			}
+			//RGB image segmentation
+			else
+			{
+				parallel_for(blocked_range<int>(0, (int)image.rows), [=, &image](blocked_range<int> localRows) {
+					for (int row = localRows.begin(); row < localRows.end(); row++)
+					{
+						parallel_for(blocked_range<int>(0, (int)image.cols), [=, &image](blocked_range<int> localCols) {
+							for (int col = localCols.begin(); col < localCols.end(); col++)
+							{
+								int k = m_mapping[row * (image.cols) + col];
+
+								Vec3b &pixel = image.at<Vec3b>(row, col);
+
+								for (int c = 0; c < m_nb_channels; c++)
+								{
+									pixel[c] = (uchar)m_centroids[k * m_nb_channels + c];
+								}
+							}
+						});
+					}
+				});
+			}
+		}
 	} //end seg function
 
 	//Kmeans + Image segmentation

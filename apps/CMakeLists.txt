@@ -1,7 +1,13 @@
 #MAIN APP
 
-add_executable(app app.cpp)
+set(Tbb_LIBS tbb)
 
-target_link_libraries(app PUBLIC kmeansAlgo ${OpenCV_LIBS} ${Boost_LIBRARIES})
+# Main executables setting & linking
+set(apps app benchmark)
 
-target_include_directories(app PUBLIC ${PROJECT_SOURCE_DIR}/include)
+foreach( TAR ${apps} )
+    add_executable(${TAR} "${TAR}.cpp")
+    target_include_directories(${TAR} PUBLIC ${PROJECT_SOURCE_DIR}/include)
+    target_link_libraries(${TAR} PUBLIC kmeansAlgo ${OpenCV_LIBS} ${Boost_LIBRARIES} ${Tbb_LIBS})
+endforeach(TAR)
+

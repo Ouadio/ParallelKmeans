@@ -23,10 +23,12 @@ find_package(OpenCV REQUIRED)
 find_package(Boost COMPONENTS system filesystem program_options REQUIRED) 
 find_package(OpenMP REQUIRED)
 
-message(STATUS "OpenCV Include dirs ${OpenCV_INCLUDE_DIRS}")
-message(STATUS "OpenCV LINK LIBRARIES ${OpenCV_LIBS}")
-message(STATUS "Boost Link Lib ${Boost_LIBRARIES}")
+message(STATUS "++ OpenCV Link Libraries ${OpenCV_LIBS}")
+message(STATUS "++ Boost Link Libraries ${Boost_LIBRARIES}")
 
 # Subdirectories
 add_subdirectory(src)
 add_subdirectory(apps)
+
+# Submodules Subdirectories
+add_subdirectory(tbb)

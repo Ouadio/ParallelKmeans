@@ -36,7 +36,7 @@ namespace KM
 
         //Setters & Gettersfor centroids
         void setCentroids(std::vector<uchar> centr);
-        std::vector<uchar> getCentroids();
+        std::vector<uchar> getCentroids() const;
 
         //Main kmeans method : iterative computing & update of centroids positions & associated
         //pixels of the image
