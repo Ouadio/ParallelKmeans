@@ -23,7 +23,7 @@ int main(int argc, char **argv)
 
     using namespace boost::program_options;
     options_description desc;
-    desc.add_options()("help", "produce help")("mode", value<std::string>(), "seq | omp | tbb");
+    desc.add_options()("help", "produce help")("mode", value<std::string>()->default_value("seq"), "seq | omp | tbb")("k-variations", value<int>()->default_value(4), "Number of k-centroids variations for benchmark");
 
     variables_map vm;
     store(parse_command_line(argc, argv, desc), vm);
@@ -44,8 +44,15 @@ int main(int argc, char **argv)
 
     std::string mode = vm["mode"].as<std::string>();
 
+    int nbVariations = vm["k-variations"].as<int>();
+
     //Hardcoded nb centroids scenarios
-    int nbs_centroids[4] = {3, 7, 13, 23};
+    int *nbs_centroids = new int[nbVariations];
+    nbs_centroids[0] = 2;
+    for (size_t k = 1; k < nbVariations; k++)
+    {
+        nbs_centroids[k] = nbs_centroids[k-1] * 2;
+    }
 
     //Reading and preparing image & logFile
     Mat imageBench, imageCopy;
@@ -79,7 +86,7 @@ int main(int argc, char **argv)
         }
 
         //Looping over different nb centroids examples : {3, 7, 13, 23}
-        for (int k = 0; k < 4; k++)
+        for (int k = 0; k < nbVariations; k++)
         {
             imageCopy = imageBench.clone();
             int nb_centroids = nbs_centroids[k];
@@ -95,5 +102,7 @@ int main(int argc, char **argv)
     }
     myFile.close();
     std::cout << "\nLog benchmark written at -----------> " << logFile << std::endl;
+
+    delete[] nbs_centroids;
     return 0;
 }
