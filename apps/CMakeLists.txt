@@ -11,3 +11,6 @@ foreach( TAR ${apps} )
     target_link_libraries(${TAR} PUBLIC kmeansAlgo ${OpenCV_LIBS} ${Boost_LIBRARIES} ${Tbb_LIBS})
 endforeach(TAR)
 
+add_executable(appMPI appMPI.cpp)
+target_include_directories(appMPI PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(appMPI PUBLIC kmeansMPIAlgo ${OpenCV_LIBS} ${Boost_LIBRARIES} ${MPI_LIBRARIES} MPI::MPI_CXX) 

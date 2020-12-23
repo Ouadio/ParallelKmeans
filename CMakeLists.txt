@@ -22,9 +22,11 @@ endif()
 find_package(OpenCV REQUIRED)
 find_package(Boost COMPONENTS system filesystem program_options REQUIRED) 
 find_package(OpenMP REQUIRED)
+find_package(MPI COMPONENTS MPICXX CXX REQUIRED)
 
 message(STATUS "++ OpenCV Link Libraries ${OpenCV_LIBS}")
 message(STATUS "++ Boost Link Libraries ${Boost_LIBRARIES}")
+message(STATUS "++ MPI Link Libraries ${MPI_LIBRARIES}"
 
 # Subdirectories
 add_subdirectory(src)
